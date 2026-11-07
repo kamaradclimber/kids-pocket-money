@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mon argent de poche</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; line-height: 1.5; margin: 0; padding: 2rem 1rem; background: #f6f6f4; color: #1d1d1b; }
+    main { max-width: 36rem; margin: 0 auto; background: #fff; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 0.25rem 1rem #0001; }
+    h1 { margin-top: 0; font-size: 1.5rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    label { display: block; font-weight: 600; margin-top: 1rem; }
+    input { box-sizing: border-box; font: inherit; width: 100%; padding: 0.55rem 0.65rem; border: 1px solid #888; border-radius: 0.35rem; background: #fff; color: #111; }
+    button { font: inherit; cursor: pointer; border: 0; border-radius: 0.35rem; padding: 0.55rem 0.8rem; background: #285a48; color: #fff; }
+    button.secondary { background: #555; white-space: nowrap; }
+    button[type=submit] { margin-top: 1.25rem; width: 100%; font-weight: 700; }
+    .hint, .meta { color: #555; font-size: 0.92rem; }
+    .message { padding: 0.75rem 0.9rem; border-radius: 0.4rem; margin: 1rem 0; }
+    .error { background: #fde8e8; color: #7a1b1b; }
+    .success { background: #e5f5e9; color: #135b2c; }
+    .badge { display: inline-block; font-size: 0.78rem; padding: 0.1rem 0.45rem; border-radius: 999px; vertical-align: middle; background: #eee; color: #333; }
+    .badge.monthly { background: #e5f5e9; color: #135b2c; }
+    a { color: #285a48; }
+    .balance { font-size: 2.2rem; font-weight: 700; color: #285a48; margin: 0.5rem 0 0; }
+    .balance.negative { color: #a3352f; }
+    .tx-list { list-style: none; padding: 0; margin: 0; }
+    .tx-item { padding: 0.75rem 0; border-top: 1px solid #ddd; }
+    .tx-item:first-child { border-top: 0; }
+    .tx-row { display: flex; justify-content: space-between; gap: 0.75rem; }
+    .tx-label { font-weight: 600; word-break: break-word; }
+    .tx-amount { font-weight: 700; white-space: nowrap; }
+    .credit { color: #135b2c; }
+    .debit { color: #a3352f; }
+    .tx-meta { color: #555; font-size: 0.92rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .tx-meta form { margin: 0; }
+    .tx-meta button { margin-top: 0; width: auto; padding: 0.3rem 0.6rem; font-size: 0.85rem; font-weight: 500; }
+    .radio-row { display: flex; gap: 1rem; margin-top: 0.75rem; }
+    .radio-row label { display: flex; align-items: center; gap: 0.35rem; font-weight: 500; margin-top: 0; }
+    .radio-row input { width: auto; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #171816; color: #eee; }
+      main { background: #242522; }
+      input { background: #171816; color: #eee; border-color: #777; }
+      .hint, .meta, .tx-meta { color: #bbb; }
+      .error { background: #4a2222; color: #ffd7d7; }
+      .success { background: #1e3d2a; color: #d7ffe3; }
+      .badge { background: #333; color: #ddd; }
+      .badge.monthly { background: #1e3d2a; color: #d7ffe3; }
+      .tx-item { border-color: #444; }
+      a { color: #9ed8bd; }
+      .balance { color: #9ed8bd; }
+      .balance.negative { color: #ff9d9d; }
+      .credit { color: #d7ffe3; }
+      .debit { color: #ffd7d7; }
+    }
+  </style>
+</head>
+<body>
+<main data-user="{{.User}}">
+  <h1>Mon argent de poche</h1>
+  {{with .Kid}}<p class="meta">Bonjour <strong>{{.Name}}</strong> ! (compte {{$.User}})</p>{{end}}
+
+  {{if .Error}}<div class="message error" role="alert">{{.Error}}</div>{{end}}
+
+  {{with .Kid}}
+  <div class="balance {{if lt .Balance 0}}negative{{end}}">{{euro .Balance}}</div>
+  <p class="meta">C'est l'argent que tes parents gardent pour toi.</p>
+
+  <h2>Enregistrer une dépense</h2>
+  <form method="post" action="/kid/{{.ID}}/transaction">
+    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+    <label for="amount">Montant en euros</label>
+    <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="12,50" required>
+    <label for="label">Description</label>
+    <input id="label" name="label" maxlength="200" autocomplete="off" placeholder="ex : achat d'un jeu" required>
+    <input type="hidden" name="kind" value="spend">
+    <p class="hint">Le montant est retiré de ton solde. Pour ajouter de l'argent, demande à un parent.</p>
+    <button type="submit">Enregistrer la dépense</button>
+  </form>
+
+  <h2>Tes opérations</h2>
+  {{if $.Transactions}}
+  <ul class="tx-list">
+    {{range $.Transactions}}
+    <li class="tx-item">
+      <div class="tx-row">
+        <span class="tx-label">{{.Label}}{{if eq .Kind "allowance"}} <span class="badge monthly">{{monthName .Month}}</span>{{end}}</span>
+        <span class="tx-amount {{if lt .Amount 0}}debit{{else}}credit{{end}}">{{euro .Amount}}</span>
+      </div>
+      <p class="tx-meta">{{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedBy}}{{end}} · {{date .CreatedAt}}</p>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="meta">Aucune opération pour le moment.</p>
+  {{end}}
+  {{end}}
+</main>
+</body>
+</html>

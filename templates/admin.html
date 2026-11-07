@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Argent de poche</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; line-height: 1.5; margin: 0; padding: 2rem 1rem; background: #f6f6f4; color: #1d1d1b; }
+    main { max-width: 36rem; margin: 0 auto; background: #fff; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 0.25rem 1rem #0001; }
+    h1 { margin-top: 0; font-size: 1.5rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    h3 { font-size: 1.05rem; margin: 0; }
+    label { display: block; font-weight: 600; margin-top: 1rem; }
+    input { box-sizing: border-box; font: inherit; width: 100%; padding: 0.55rem 0.65rem; border: 1px solid #888; border-radius: 0.35rem; background: #fff; color: #111; }
+    button { font: inherit; cursor: pointer; border: 0; border-radius: 0.35rem; padding: 0.55rem 0.8rem; background: #285a48; color: #fff; }
+    button.secondary { background: #555; white-space: nowrap; }
+    button[type=submit] { margin-top: 1.25rem; width: 100%; font-weight: 700; }
+    .hint, .meta { color: #555; font-size: 0.92rem; }
+    .message { padding: 0.75rem 0.9rem; border-radius: 0.4rem; margin: 1rem 0; }
+    .error { background: #fde8e8; color: #7a1b1b; }
+    .success { background: #e5f5e9; color: #135b2c; }
+    a { color: #285a48; }
+    .balance { font-size: 1.4rem; font-weight: 700; color: #285a48; white-space: nowrap; }
+    .balance.negative { color: #a3352f; }
+    .kid-list { list-style: none; padding: 0; margin: 0; }
+    .kid-card { padding: 1rem; border: 1px solid #ddd; border-radius: 0.5rem; margin-top: 1rem; }
+    .kid-head { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; }
+    .tx-row { display: flex; justify-content: space-between; gap: 0.75rem; }
+    .tx-amount { font-weight: 700; white-space: nowrap; }
+    .radio-row { display: flex; gap: 1rem; margin-top: 0.75rem; }
+    .radio-row label { display: flex; align-items: center; gap: 0.35rem; font-weight: 500; margin-top: 0; }
+    .radio-row input { width: auto; }
+    .divider { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #171816; color: #eee; }
+      main { background: #242522; }
+      input { background: #171816; color: #eee; border-color: #777; }
+      .hint, .meta { color: #bbb; }
+      .error { background: #4a2222; color: #ffd7d7; }
+      .success { background: #1e3d2a; color: #d7ffe3; }
+      .kid-card, .divider { border-color: #444; }
+      a { color: #9ed8bd; }
+      .balance { color: #9ed8bd; }
+      .balance.negative { color: #ff9d9d; }
+    }
+  </style>
+</head>
+<body>
+<main data-user="{{.User}}">
+  <h1>Argent de poche</h1>
+  <p class="meta">Connecté en tant que <strong>{{.User}}</strong>. Vue parents.</p>
+
+  {{if .Error}}<div class="message error" role="alert">{{.Error}}</div>{{end}}
+
+  <h2>Les enfants</h2>
+  {{if .Kids}}
+  <ul class="kid-list">
+    {{range .Kids}}
+    <li class="kid-card">
+      <div class="kid-head">
+        <h3>{{.Name}}</h3>
+        <span class="balance {{if lt .Balance 0}}negative{{end}}">{{euro .Balance}}</span>
+      </div>
+      <p class="meta">Compte {{.Username}} · {{euro .MonthlyAmount}} par mois (depuis {{monthName .StartMonth}})</p>
+      <form method="post" action="/kid/{{.ID}}/transaction">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <div class="radio-row">
+          <label><input type="radio" name="kind" value="spend" checked> Dépense</label>
+          <label><input type="radio" name="kind" value="add"> Ajout</label>
+        </div>
+        <label for="tx-amount-{{.ID}}">Montant en euros</label>
+        <input id="tx-amount-{{.ID}}" name="amount" inputmode="decimal" autocomplete="off" placeholder="12,50" required>
+        <label for="tx-label-{{.ID}}">Description</label>
+        <input id="tx-label-{{.ID}}" name="label" maxlength="200" autocomplete="off" placeholder="ex : achat d'un jeu" required>
+        <button type="submit">Enregistrer l'opération</button>
+      </form>
+      <p class="meta"><a href="/kid/{{.ID}}">Voir le détail et l'historique</a></p>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="meta">Aucun enfant enregistré pour le moment.</p>
+  {{end}}
+
+  <div class="divider">
+    <h2>Ajouter un enfant</h2>
+    <form method="post" action="/kid">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label for="username">Nom d'utilisateur</label>
+      <input id="username" name="username" autocomplete="off" required>
+      <p class="hint">Le nom de compte authentifié par Authelia (l'en-tête Remote-User).</p>
+      <label for="name">Prénom</label>
+      <input id="name" name="name" autocomplete="off" required>
+      <label for="monthly_amount">Argent de poche mensuel en euros</label>
+      <input id="monthly_amount" name="monthly_amount" inputmode="decimal" autocomplete="off" placeholder="10" required>
+      <label for="start_month">Premier mois (optionnel)</label>
+      <input id="start_month" name="start_month" autocomplete="off" placeholder="2025-11">
+      <p class="hint">Les mois manquants depuis ce mois seront crédités automatiquement.</p>
+      <button type="submit">Créer le compte</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>
