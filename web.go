@@ -152,6 +152,19 @@ func remoteUser(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("Remote-User"))
 }
 
+// remoteName returns the display name of the authenticated user, as
+// provided by authelia in the Remote-Name header. Falls back to the
+// username when the header is absent.
+func remoteName(r *http.Request) string {
+	if name := strings.TrimSpace(r.Header.Get("Remote-Name")); name != "" {
+		if len(name) > 200 {
+			name = name[:200]
+		}
+		return name
+	}
+	return remoteUser(r)
+}
+
 func hasGroup(r *http.Request, wanted string) bool {
 	for _, value := range r.Header.Values("Remote-Groups") {
 		for _, group := range strings.Split(value, ",") {
@@ -439,7 +452,7 @@ func (a *app) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 		date = parsed
 	}
-	if _, err := a.store.addTransaction(kidID, amount, label, user, date, time.Now()); err != nil {
+	if _, err := a.store.addTransaction(kidID, amount, label, remoteName(r), user, date, time.Now()); err != nil {
 		slog.Error("add transaction", "error", err)
 		a.renderActionError(w, r, user, isAdmin, http.StatusInternalServerError, "Erreur à l'enregistrement.")
 		return

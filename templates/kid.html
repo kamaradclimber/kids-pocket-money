@@ -105,7 +105,7 @@
         <span class="tx-amount {{if lt .Amount 0}}debit{{else}}credit{{end}}">{{euro .Amount}}</span>
       </div>
       <p class="tx-meta">
-        {{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedBy}}{{end}}
+        {{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedName}}{{end}}
         · {{niceDate .Date}}
         {{if eq .Kind "manual"}}
         <form method="post" action="/transaction/{{.ID}}/delete" data-confirm="Supprimer « {{.Label}} ({{euro .Amount}}) » ?">

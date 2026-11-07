@@ -91,7 +91,7 @@
         <span class="tx-label">{{.Label}}{{if eq .Kind "allowance"}} <span class="badge monthly">{{monthName .Month}}</span>{{end}}</span>
         <span class="tx-amount {{if lt .Amount 0}}debit{{else}}credit{{end}}">{{euro .Amount}}</span>
       </div>
-      <p class="tx-meta">{{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedBy}}{{end}} · {{niceDate .Date}}</p>
+      <p class="tx-meta">{{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedName}}{{end}} · {{niceDate .Date}}</p>
     </li>
     {{end}}
   </ul>

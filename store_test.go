@@ -85,7 +85,7 @@ func TestManualTransactionsAndBalance(t *testing.T) {
 		t.Fatalf("ensure: %v", err)
 	}
 
-	if _, err := st.addTransaction(k.ID, -550, "achat d'un jeu", "kid1", now, now); err != nil {
+	if _, err := st.addTransaction(k.ID, -550, "achat d'un jeu", "Alice", "kid1", now, now); err != nil {
 		t.Fatalf("addTransaction: %v", err)
 	}
 	balance, _ := st.balance(k.ID)
@@ -111,7 +111,7 @@ func TestDeleteTransaction(t *testing.T) {
 	k := mustCreateKid(t, st, "kid1", "Alice", 1000, "2025-11")
 	_, _ = st.ensureMonthlyAllowances(now)
 
-	manualID, err := st.addTransaction(k.ID, -300, "bonbon", "kid1", now, now)
+	manualID, err := st.addTransaction(k.ID, -300, "bonbon", "Alice", "kid1", now, now)
 	if err != nil {
 		t.Fatalf("addTransaction: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestAddTransactionWithDate(t *testing.T) {
 
 	// A backdated operation: recorded on Nov 15 but dated Oct 3.
 	opDate := time.Date(2025, time.October, 3, 0, 0, 0, 0, time.UTC)
-	if _, err := st.addTransaction(k.ID, -450, "bonbons", "kid1", opDate, now); err != nil {
+	if _, err := st.addTransaction(k.ID, -450, "bonbons", "Alice", "kid1", opDate, now); err != nil {
 		t.Fatalf("addTransaction: %v", err)
 	}
 	txs, err := st.listTransactions(k.ID)
@@ -225,10 +225,10 @@ func TestTransactionsOrderedByDate(t *testing.T) {
 
 	older := time.Date(2025, time.September, 20, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2025, time.October, 5, 0, 0, 0, 0, time.UTC)
-	if _, err := st.addTransaction(k.ID, -100, "récent", "kid1", newer, now); err != nil {
+	if _, err := st.addTransaction(k.ID, -100, "récent", "Alice", "kid1", newer, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.addTransaction(k.ID, -200, "ancien", "kid1", older, now); err != nil {
+	if _, err := st.addTransaction(k.ID, -200, "ancien", "Alice", "kid1", older, now); err != nil {
 		t.Fatal(err)
 	}
 	txs, _ := st.listTransactions(k.ID)
@@ -314,12 +314,124 @@ CREATE TABLE transactions (
 	}
 
 	// New inserts carry the date column.
-	if _, err := st.addTransaction(1, -100, "date moderne", "kid1",
+	if _, err := st.addTransaction(1, -100, "date moderne", "Alice", "kid1",
 		time.Date(2025, time.November, 1, 0, 0, 0, 0, time.UTC), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	txs, _ = st.listTransactions(1)
 	if txs[0].Date != "2025-11-01" {
 		t.Errorf("expected 2025-11-01, got %q", txs[0].Date)
+	}
+}
+
+func TestAddTransactionStoresCreatedName(t *testing.T) {
+	st := testStore(t)
+	now := time.Date(2025, time.November, 15, 10, 0, 0, 0, time.UTC)
+	k := mustCreateKid(t, st, "kid1", "Alice", 0, "2025-11")
+
+	// Created by a parent whose display name comes from authelia.
+	if _, err := st.addTransaction(k.ID, -450, "bonbons", "Grégoire", "grego", now, now); err != nil {
+		t.Fatalf("addTransaction: %v", err)
+	}
+	// Created by a kid without a Remote-Name header: createdName empty.
+	if _, err := st.addTransaction(k.ID, -100, "petit achat", "", "kid1", now, now); err != nil {
+		t.Fatalf("addTransaction: %v", err)
+	}
+	txs, err := st.listTransactions(k.ID)
+	if err != nil {
+		t.Fatalf("listTransactions: %v", err)
+	}
+	if len(txs) != 2 {
+		t.Fatalf("expected 2 transactions, got %d", len(txs))
+	}
+	if txs[1].CreatedName != "Grégoire" || txs[1].CreatedBy != "grego" {
+		t.Errorf("expected CreatedName Grégoire / CreatedBy grego, got %q / %q",
+			txs[1].CreatedName, txs[1].CreatedBy)
+	}
+	// Empty created_name falls back to the username.
+	if txs[0].CreatedName != "kid1" {
+		t.Errorf("expected fallback to username kid1, got %q", txs[0].CreatedName)
+	}
+}
+
+func TestMigrationBackfillsCreatedNameForKids(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.db")
+
+	// A pre-created_name database, as deployed by 0.2.0: date column
+	// present, created_name absent.
+	old, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open old db: %v", err)
+	}
+	const oldSchema = `
+CREATE TABLE kids (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  monthly_amount INTEGER NOT NULL DEFAULT 0,
+  start_month TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL
+);
+CREATE TABLE transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kid_id INTEGER NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('allowance','manual')),
+  month TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  date TEXT NOT NULL DEFAULT ''
+);`
+	if _, err := old.Exec(oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	if _, err := old.Exec(`INSERT INTO kids (username, name, monthly_amount, start_month, created_at, created_by)
+		VALUES ('kid1', 'Alice', 1000, '2025-09', '2025-09-01T10:00:00Z', 'parent')`); err != nil {
+		t.Fatal(err)
+	}
+	// A manual row created by the kid (backfillable from kids.name) and
+	// one created by a parent (falls back to the username).
+	if _, err := old.Exec(`INSERT INTO transactions (kid_id, amount, label, kind, month, created_by, created_at, date)
+		VALUES (1, -250, 'livre', 'manual', '2025-09', 'kid1', '2025-09-12T18:30:00Z', '2025-09-12')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO transactions (kid_id, amount, label, kind, month, created_by, created_at, date)
+		VALUES (1, 1000, 'Argent de poche', 'allowance', '2025-09', 'system', '2025-09-01T10:00:00Z', '2025-09-01')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO transactions (kid_id, amount, label, kind, month, created_by, created_at, date)
+		VALUES (1, -500, 'grand achat', 'manual', '2025-10', 'grego', '2025-10-02T09:00:00Z', '2025-10-02')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := newStore(path)
+	if err != nil {
+		t.Fatalf("migrate old db: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	txs, err := st.listTransactions(1)
+	if err != nil {
+		t.Fatalf("listTransactions: %v", err)
+	}
+	// Ordered date DESC: Oct 2 parent row, Sep 12 kid row, Sep 1 allowance.
+	if len(txs) != 3 {
+		t.Fatalf("expected 3 transactions, got %d", len(txs))
+	}
+	byLabel := map[string]transaction{}
+	for _, tx := range txs {
+		byLabel[tx.Label] = tx
+	}
+	if byLabel["livre"].CreatedName != "Alice" {
+		t.Errorf("kid-created row should be backfilled with Alice, got %q", byLabel["livre"].CreatedName)
+	}
+	if byLabel["grand achat"].CreatedName != "grego" {
+		t.Errorf("parent-created row should fall back to the username, got %q", byLabel["grand achat"].CreatedName)
 	}
 }

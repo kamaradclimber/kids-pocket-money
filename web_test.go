@@ -526,3 +526,54 @@ func TestNiceDate(t *testing.T) {
 		t.Errorf("niceDate fallback failed: %q", got)
 	}
 }
+
+func TestTransactionShowsDisplayName(t *testing.T) {
+	a := testApp(t)
+	now := time.Now()
+	k, err := a.store.createKid("alice", "Alice", 1000, now.Format("2006-01"), "parent", now)
+	if err != nil {
+		t.Fatalf("createKid: %v", err)
+	}
+	_, _ = a.store.ensureMonthlyAllowances(now)
+
+	// A parent records a spend; authelia passes Remote-Name along.
+	form := url.Values{
+		"csrf_token": {strings.Repeat("a", 64)},
+		"kind":       {"spend"},
+		"amount":     {"4,50"},
+		"label":      {"gloubix"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Remote-User", "grego")
+	req.Header.Set("Remote-Groups", "parents")
+	req.Header.Set("Remote-Name", "Grégoire")
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: strings.Repeat("a", 64)})
+	rec := httptest.NewRecorder()
+	a.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The kid's history shows the parent's display name, not the username.
+	body := request(t, a, http.MethodGet, "/", "alice", "kids", nil).Body.String()
+	if !strings.Contains(body, "Ajouté par Grégoire") {
+		t.Errorf("kid history should show the display name Grégoire, got:\n%s", body)
+	}
+	if strings.Contains(body, "Ajouté par grego") {
+		t.Error("kid history must not show the raw username")
+	}
+}
+
+func TestRemoteNameFallsBackToUsername(t *testing.T) {
+	r, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Remote-User", "grego")
+	if got := remoteName(r); got != "grego" {
+		t.Errorf("expected fallback to username, got %q", got)
+	}
+	r.Header.Set("Remote-Name", "  Grégoire Seux  ")
+	if got := remoteName(r); got != "Grégoire Seux" {
+		t.Errorf("expected trimmed Remote-Name, got %q", got)
+	}
+}

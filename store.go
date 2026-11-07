@@ -30,15 +30,16 @@ type kid struct {
 }
 
 type transaction struct {
-	ID        int64
-	KidID     int64
-	Amount    int64 // cents, signed
-	Label     string
-	Kind      string // allowance | manual
-	Month     string
-	Date      string // "YYYY-MM-DD", the operation date
-	CreatedBy string
-	CreatedAt time.Time // technical creation timestamp
+	ID          int64
+	KidID       int64
+	Amount      int64 // cents, signed
+	Label       string
+	Kind        string // allowance | manual
+	Month       string
+	Date        string    // "YYYY-MM-DD", the operation date
+	CreatedName string    // display name of the creator (Authelia Remote-Name)
+	CreatedBy   string    // username (or "system")
+	CreatedAt   time.Time // technical creation timestamp
 }
 
 type kidOverview struct {
@@ -82,6 +83,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   label TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('allowance','manual')),
   month TEXT NOT NULL,
+  created_name TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT ''
@@ -95,13 +97,18 @@ CREATE INDEX IF NOT EXISTS idx_transactions_kid ON transactions(kid_id);
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	// The date column was added after the first deployed version: existing
-	// databases already have the table, so CREATE TABLE IF NOT EXISTS does
-	// nothing for them and the column must be added by hand. Ignore the
-	// "duplicate column" error: it only means a second startup.
-	if _, err := s.db.Exec(`ALTER TABLE transactions ADD COLUMN date TEXT NOT NULL DEFAULT ''`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column") {
-		return fmt.Errorf("add date column: %w", err)
+	// The date and created_name columns were added after the first deployed
+	// version: existing databases already have the table, so CREATE TABLE IF
+	// NOT EXISTS does nothing for them and the columns must be added by hand.
+	// Ignore the "duplicate column" error: it only means a second startup.
+	for _, col := range []string{
+		`ALTER TABLE transactions ADD COLUMN date TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE transactions ADD COLUMN created_name TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := s.db.Exec(col); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate column: %w", err)
+		}
 	}
 	// Backfill the operation date for pre-existing rows: the first day of
 	// the credited month for allowances, the creation day for manual rows.
@@ -110,6 +117,15 @@ CREATE INDEX IF NOT EXISTS idx_transactions_kid ON transactions(kid_id);
 		UPDATE transactions SET date = substr(created_at, 1, 10) WHERE date = '' AND kind = 'manual';
 	`); err != nil {
 		return fmt.Errorf("backfill date: %w", err)
+	}
+	// Backfill created_name for rows written before the column existed: the
+	// kid's display name when the creator was a registered kid. Rows created
+	// by parents keep an empty created_name and fall back to the username.
+	if _, err := s.db.Exec(`
+		UPDATE transactions SET created_name = COALESCE((SELECT name FROM kids WHERE username = transactions.created_by), '')
+			WHERE created_name = '' AND kind = 'manual';
+	`); err != nil {
+		return fmt.Errorf("backfill created_name: %w", err)
 	}
 	return nil
 }
@@ -188,12 +204,14 @@ func (s *store) updateMonthlyAmount(id int64, amount int64) error {
 
 // addTransaction inserts a manual transaction. Amount is signed cents.
 // date is the operation date (may differ from the creation instant);
-// now is the technical creation timestamp.
-func (s *store) addTransaction(kidID, amount int64, label, createdBy string, date time.Time, now time.Time) (int64, error) {
+// createdName is the display name of the creator (may be empty: the
+// username is used as a fallback at read time); now is the technical
+// creation timestamp.
+func (s *store) addTransaction(kidID, amount int64, label, createdName, createdBy string, date time.Time, now time.Time) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO transactions (kid_id, amount, label, kind, month, date, created_by, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		kidID, amount, label, txKindManual, date.Format("2006-01"), date.Format("2006-01-02"), createdBy, now.Format(time.RFC3339))
+		`INSERT INTO transactions (kid_id, amount, label, kind, month, date, created_name, created_by, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		kidID, amount, label, txKindManual, date.Format("2006-01"), date.Format("2006-01-02"), createdName, createdBy, now.Format(time.RFC3339))
 	if err != nil {
 		return 0, fmt.Errorf("insert transaction: %w", err)
 	}
@@ -227,7 +245,7 @@ func (s *store) deleteTransaction(id int64) error {
 
 func (s *store) listTransactions(kidID int64) ([]transaction, error) {
 	rows, err := s.db.Query(
-		`SELECT id, kid_id, amount, label, kind, month, date, created_by, created_at
+		`SELECT id, kid_id, amount, label, kind, month, date, created_name, created_by, created_at
 		 FROM transactions WHERE kid_id = ? ORDER BY date DESC, id DESC`, kidID)
 	if err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)
@@ -237,13 +255,16 @@ func (s *store) listTransactions(kidID int64) ([]transaction, error) {
 	for rows.Next() {
 		var tx transaction
 		var createdAt string
-		err := rows.Scan(&tx.ID, &tx.KidID, &tx.Amount, &tx.Label, &tx.Kind, &tx.Month, &tx.Date, &tx.CreatedBy, &createdAt)
+		err := rows.Scan(&tx.ID, &tx.KidID, &tx.Amount, &tx.Label, &tx.Kind, &tx.Month, &tx.Date, &tx.CreatedName, &tx.CreatedBy, &createdAt)
 		if err != nil {
 			return nil, fmt.Errorf("list transactions: %w", err)
 		}
 		tx.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if tx.Date == "" { // pre-migration rows that failed to backfill
 			tx.Date = tx.Month + "-01"
+		}
+		if tx.CreatedName == "" { // rows written before the column existed
+			tx.CreatedName = tx.CreatedBy
 		}
 		txs = append(txs, tx)
 	}
