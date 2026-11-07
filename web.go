@@ -257,22 +257,23 @@ func (a *app) resolveKid(w http.ResponseWriter, r *http.Request) (kid, bool) {
 	return k, true
 }
 
-// GET /enfant/{username}: history + parent forms for one kid. Parents only:
-// a kid's own history is on their dashboard, and kids must not see each
-// other's money.
+// GET /enfant/{username}: detail page for one kid. Parents see any kid;
+// a kid sees their own page (without the parent-only forms); anything
+// else answers 404 so as not to leak other kids' existence.
 func (a *app) handleKid(w http.ResponseWriter, r *http.Request) {
-	if !hasGroup(r, a.cfg.AdminGroup) {
-		// Kid detail pages are parent-only; kids use their own dashboard.
-		a.notFound(w, r)
-		return
-	}
 	user := remoteUser(r)
-	isAdmin := true
+	isAdmin := hasGroup(r, a.cfg.AdminGroup)
 	if _, err := a.store.ensureMonthlyAllowances(time.Now()); err != nil {
 		slog.Error("ensure allowances", "error", err)
 	}
 	k, ok := a.resolveKid(w, r)
 	if !ok {
+		return
+	}
+	// A kid may only view their own page; a parent may view any kid.
+	// 404 (not 403): usernames must not be enumerable by other kids.
+	if !isAdmin && k.Username != user {
+		a.notFound(w, r)
 		return
 	}
 	data := a.basePageData(w, r, user, isAdmin)

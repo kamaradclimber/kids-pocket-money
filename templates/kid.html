@@ -61,11 +61,12 @@
 <main data-user="{{.User}}">
   <h1>{{.Detail.Name}}</h1>
   <p class="meta">Compte {{.Detail.Username}} · solde <span class="balance {{if lt .Detail.Balance 0}}negative{{end}}">{{euro .Detail.Balance}}</span></p>
-  <p class="meta"><a href="/">← Vue famille</a></p>
+  {{if .IsAdmin}}<p class="meta"><a href="/">← Vue famille</a></p>{{else}}<p class="meta"><a href="/">← Mon argent de poche</a></p>{{end}}
 
   {{if .Error}}<div class="message error" role="alert">{{.Error}}</div>{{end}}
 
   {{with .Detail}}
+  {{if $.IsAdmin}}
   <div class="admin">
     <h2>Argent de poche mensuel</h2>
     <p class="meta">Actuellement {{euro .MonthlyAmount}} par mois, crédité chaque mois depuis {{monthName .StartMonth}}.</p>
@@ -94,6 +95,7 @@
     <p class="hint">Laisse vide pour aujourd'hui. Utilise une date passée pour enregistrer une opération déjà faite.</p>
     <button type="submit">Enregistrer l'opération</button>
   </form>
+  {{end}}
 
   <h2>Historique</h2>
   {{if $.Transactions}}
@@ -107,12 +109,12 @@
       <p class="tx-meta">
         {{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedName}}{{end}}
         · {{niceDate .Date}}
-        {{if eq .Kind "manual"}}
+        {{if eq .Kind "manual"}}{{if $.IsAdmin}}
         <form method="post" action="/transaction/{{.ID}}/delete" data-confirm="Supprimer « {{.Label}} ({{euro .Amount}}) » ?">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <button type="submit" class="secondary">Supprimer</button>
         </form>
-        {{end}}
+        {{end}}{{end}}
       </p>
     </li>
     {{end}}

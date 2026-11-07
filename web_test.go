@@ -234,7 +234,7 @@ func TestParentSeesAllKidsAtOnce(t *testing.T) {
 	}
 }
 
-func TestKidCannotViewKidDetailPages(t *testing.T) {
+func TestKidViewsOwnDetailButNotOthers(t *testing.T) {
 	a := testApp(t)
 	month := time.Now().Format("2006-01")
 	if _, err := a.store.createKid("alice", "Alice", 1000, month, "parent", time.Now()); err != nil {
@@ -243,23 +243,38 @@ func TestKidCannotViewKidDetailPages(t *testing.T) {
 	if _, err := a.store.createKid("bob", "Bob", 500, month, "parent", time.Now()); err != nil {
 		t.Fatalf("createKid: %v", err)
 	}
-	// Kid detail pages are parent-only: kids use their own dashboard. A kid
-	// gets 404 for any /enfant/... URL, including their own and another kid's.
-	for _, target := range []string{"/enfant/alice", "/enfant/bob", "/enfant/inconnu"} {
-		rec := request(t, a, http.MethodGet, target, "alice", "kids", nil)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s: expected 404 for a kid, got %d", target, rec.Code)
+	_, _ = a.store.ensureMonthlyAllowances(time.Now())
+
+	// A kid sees their own page, without the parent-only forms.
+	body := request(t, a, http.MethodGet, "/enfant/alice", "alice", "kids", nil).Body.String()
+	for _, want := range []string{"Alice", "10,00 €", "Historique"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("kid own detail page should show %q", want)
 		}
 	}
-	// A parent sees the kid detail page.
+	for _, banned := range []string{"Nouveau montant mensuel", "Enregistrer l'opération", "Enregistrer le montant", "Supprimer", "/transaction/"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("kid own detail page must not contain %q (parent-only)", banned)
+		}
+	}
+
+	// Another kid's page, and unknown usernames, are 404: usernames must
+	// not be enumerable. A parent sees any kid.
+	for _, tc := range []struct{ user, groups, target string }{
+		{"alice", "kids", "/enfant/bob"},
+		{"alice", "kids", "/enfant/inconnu"},
+	} {
+		rec := request(t, a, http.MethodGet, tc.target, tc.user, tc.groups, nil)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s as %s: expected 404, got %d", tc.target, tc.user, rec.Code)
+		}
+	}
 	rec := request(t, a, http.MethodGet, "/enfant/bob", "papa", "parents", nil)
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 for a parent on /enfant/bob, got %d", rec.Code)
 	}
-	// Unknown username is 404 for a parent too.
-	rec = request(t, a, http.MethodGet, "/enfant/inconnu", "papa", "parents", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for an unknown kid, got %d", rec.Code)
+	if rec2 := request(t, a, http.MethodGet, "/enfant/inconnu", "papa", "parents", nil); rec2.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for an unknown kid, got %d", rec2.Code)
 	}
 }
 
