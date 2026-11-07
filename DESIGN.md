@@ -100,10 +100,10 @@ Consequences:
 | Method | Path | Who | Action |
 |--------|------|-----|--------|
 | GET | `/` | kid / parent | kid: own dashboard; parent: family dashboard |
-| GET | `/kid/{id}` | parent / that kid | history + parent forms |
+| GET | `/enfant/{username}` | parent | history + parent forms |
 | POST | `/kid` | parent | create kid |
-| POST | `/kid/{id}/monthly` | parent | change monthly amount |
-| POST | `/kid/{id}/transaction` | parent / that kid | add manual transaction (optional operation date) |
+| POST | `/enfant/{username}/monthly` | parent | change monthly amount |
+| POST | `/enfant/{username}/transaction` | parent / that kid | add manual transaction (optional operation date) |
 | POST | `/transaction/{id}/delete` | parent | delete a manual transaction |
 | GET | `/healthz`, `/readyz` | anyone | liveness/readiness |
 

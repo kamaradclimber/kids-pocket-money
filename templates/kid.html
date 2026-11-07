@@ -69,7 +69,7 @@
   <div class="admin">
     <h2>Argent de poche mensuel</h2>
     <p class="meta">Actuellement {{euro .MonthlyAmount}} par mois, crédité chaque mois depuis {{monthName .StartMonth}}.</p>
-    <form method="post" action="/kid/{{.ID}}/monthly">
+    <form method="post" action="/enfant/{{.Username}}/monthly">
       <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
       <label for="monthly_amount">Nouveau montant mensuel en euros</label>
       <input id="monthly_amount" name="monthly_amount" inputmode="decimal" autocomplete="off" value="{{euro .MonthlyAmount}}" required>
@@ -79,7 +79,7 @@
   </div>
 
   <h2>Ajouter une opération</h2>
-  <form method="post" action="/kid/{{.ID}}/transaction">
+  <form method="post" action="/enfant/{{.Username}}/transaction">
     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
     <div class="radio-row">
       <label><input type="radio" name="kind" value="spend" checked> Dépense</label>

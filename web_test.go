@@ -143,7 +143,7 @@ func TestAccessDeniedWithoutKidsOrParentsGroup(t *testing.T) {
 	if _, err := a.store.createKid("alice", "Alice", 1000, time.Now().Format("2006-01"), "parent", time.Now()); err != nil {
 		t.Fatalf("createKid: %v", err)
 	}
-	for _, target := range []string{"/", "/kid/1", "/nope"} {
+	for _, target := range []string{"/", "/enfant/alice", "/nope"} {
 		rec := request(t, a, http.MethodGet, target, "alice", "some-other-group", nil)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("GET %s: expected 403 without kids/parents group, got %d", target, rec.Code)
@@ -155,9 +155,9 @@ func TestAccessDeniedWithoutKidsOrParentsGroup(t *testing.T) {
 		"amount":     {"1"},
 		"label":      {"x"},
 	}
-	rec := request(t, a, http.MethodPost, "/kid/1/transaction", "alice", "some-other-group", form)
+	rec := request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "some-other-group", form)
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("POST /kid/1/transaction: expected 403 without kids/parents group, got %d", rec.Code)
+		t.Errorf("POST /enfant/alice/transaction: expected 403 without kids/parents group, got %d", rec.Code)
 	}
 }
 
@@ -240,14 +240,26 @@ func TestKidCannotViewKidDetailPages(t *testing.T) {
 	if _, err := a.store.createKid("alice", "Alice", 1000, month, "parent", time.Now()); err != nil {
 		t.Fatalf("createKid: %v", err)
 	}
-	bob, err := a.store.createKid("bob", "Bob", 500, month, "parent", time.Now())
-	if err != nil {
+	if _, err := a.store.createKid("bob", "Bob", 500, month, "parent", time.Now()); err != nil {
 		t.Fatalf("createKid: %v", err)
 	}
-	// Kid detail pages are parent-only: kids use their own dashboard.
-	rec := request(t, a, http.MethodGet, "/kid/"+strconv.FormatInt(bob.ID, 10), "alice", "kids", nil)
+	// Kid detail pages are parent-only: kids use their own dashboard. A kid
+	// gets 404 for any /enfant/... URL, including their own and another kid's.
+	for _, target := range []string{"/enfant/alice", "/enfant/bob", "/enfant/inconnu"} {
+		rec := request(t, a, http.MethodGet, target, "alice", "kids", nil)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s: expected 404 for a kid, got %d", target, rec.Code)
+		}
+	}
+	// A parent sees the kid detail page.
+	rec := request(t, a, http.MethodGet, "/enfant/bob", "papa", "parents", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for a parent on /enfant/bob, got %d", rec.Code)
+	}
+	// Unknown username is 404 for a parent too.
+	rec = request(t, a, http.MethodGet, "/enfant/inconnu", "papa", "parents", nil)
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for a kid viewing a kid detail page, got %d", rec.Code)
+		t.Errorf("expected 404 for an unknown kid, got %d", rec.Code)
 	}
 }
 
@@ -295,7 +307,7 @@ func TestParentDashboard(t *testing.T) {
 		t.Error("parent dashboard should render the create-kid form")
 	}
 	// Read-only recap: name, balance and the link to the kid page.
-	for _, want := range []string{"Alice", "10,00 €", "Voir le détail et l'historique", "/kid/1"} {
+	for _, want := range []string{"Alice", "10,00 €", "Voir le détail et l'historique", "/enfant/alice"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("parent dashboard should show %q", want)
 		}
@@ -320,7 +332,7 @@ func TestCreateKidAndAllowanceFlow(t *testing.T) {
 		t.Fatalf("expected 303 redirect, got %d", rec.Code)
 	}
 	loc := rec.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/kid/") {
+	if !strings.HasPrefix(loc, "/enfant/") {
 		t.Fatalf("expected redirect to kid page, got %q", loc)
 	}
 
@@ -362,7 +374,7 @@ func TestKidCanAddOwnTransactionButNotOthers(t *testing.T) {
 		"amount":     {"4,50"},
 		"label":      {"bonbons"},
 	}
-	rec := request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	rec := request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "kids", form)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -372,7 +384,7 @@ func TestKidCanAddOwnTransactionButNotOthers(t *testing.T) {
 	}
 
 	// Alice cannot act on Bob's account.
-	rec = request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k2.ID, 10)+"/transaction", "alice", "kids", form)
+	rec = request(t, a, http.MethodPost, "/enfant/bob/transaction", "alice", "kids", form)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404 for another kid, got %d", rec.Code)
 	}
@@ -399,7 +411,7 @@ func TestKidCannotAddMoney(t *testing.T) {
 		"amount":     {"100"},
 		"label":      {"j'aimerais être riche"},
 	}
-	rec := request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	rec := request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "kids", form)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for a kid adding money, got %d", rec.Code)
 	}
@@ -409,7 +421,7 @@ func TestKidCannotAddMoney(t *testing.T) {
 	}
 
 	// A parent, on the other hand, may add money.
-	rec = request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "papa", "parents", form)
+	rec = request(t, a, http.MethodPost, "/enfant/alice/transaction", "papa", "parents", form)
 	if rec.Code != http.StatusSeeOther {
 		t.Errorf("expected 303 for a parent adding money, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -431,7 +443,7 @@ func TestCSRFIsRequired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createKid: %v", err)
 	}
-	rec := request(t, a, http.MethodPost, "/kid/1/transaction", "alice", "", form)
+	rec := request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "", form)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("expected 403 with a bad CSRF token, got %d", rec.Code)
 	}
@@ -478,7 +490,7 @@ func TestTransactionWithOptionalDate(t *testing.T) {
 		"label":      {"bonbons"},
 		"date":       {opDate.Format("2006-01-02")},
 	}
-	rec := request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	rec := request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "kids", form)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -516,7 +528,7 @@ func TestTransactionInvalidDateRejected(t *testing.T) {
 		"label":      {"bonbons"},
 		"date":       {"31/02/2025"}, // French day-first format must be rejected
 	}
-	rec := request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	rec := request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "kids", form)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for invalid date, got %d", rec.Code)
 	}
@@ -528,7 +540,7 @@ func TestTransactionInvalidDateRejected(t *testing.T) {
 
 	// Out-of-range year rejected too.
 	form.Set("date", "1999-12-31")
-	rec = request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	rec = request(t, a, http.MethodPost, "/enfant/alice/transaction", "alice", "kids", form)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for out-of-range date, got %d", rec.Code)
 	}
@@ -546,8 +558,7 @@ func TestNiceDate(t *testing.T) {
 func TestTransactionShowsDisplayName(t *testing.T) {
 	a := testApp(t)
 	now := time.Now()
-	k, err := a.store.createKid("alice", "Alice", 1000, now.Format("2006-01"), "parent", now)
-	if err != nil {
+	if _, err := a.store.createKid("alice", "Alice", 1000, now.Format("2006-01"), "parent", now); err != nil {
 		t.Fatalf("createKid: %v", err)
 	}
 	_, _ = a.store.ensureMonthlyAllowances(now)
@@ -559,7 +570,7 @@ func TestTransactionShowsDisplayName(t *testing.T) {
 		"amount":     {"4,50"},
 		"label":      {"gloubix"},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction",
+	req := httptest.NewRequest(http.MethodPost, "/enfant/alice/transaction",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Remote-User", "grego")

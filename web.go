@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ type pageData struct {
 	// parent dashboard (GET /)
 	Kids []kidOverview
 
-	// kid detail (GET /kid/{id})
+	// kid detail (GET /enfant/{username})
 	Detail *kidOverview
 }
 
@@ -112,10 +113,10 @@ func (a *app) routes() http.Handler {
 	})
 	app := http.NewServeMux()
 	app.HandleFunc("GET /", a.handleIndex)
-	app.HandleFunc("GET /kid/{id}", a.handleKid)
+	app.HandleFunc("GET /enfant/{username}", a.handleKid)
 	app.HandleFunc("POST /kid", a.handleCreateKid)
-	app.HandleFunc("POST /kid/{id}/monthly", a.handleMonthly)
-	app.HandleFunc("POST /kid/{id}/transaction", a.handleTransaction)
+	app.HandleFunc("POST /enfant/{username}/monthly", a.handleMonthly)
+	app.HandleFunc("POST /enfant/{username}/transaction", a.handleTransaction)
 	app.HandleFunc("POST /transaction/{id}/delete", a.handleDeleteTransaction)
 	// Everything else goes through the global access rule.
 	mux.Handle("/", a.requireAuth(app))
@@ -240,8 +241,24 @@ func (a *app) handleIndex(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, http.StatusOK, "index.html", data)
 }
 
-// GET /kid/{id}: history + parent forms for one kid. Parents only: a
-// kid's own history is on their dashboard, and kids must not see each
+// resolveKid looks up the kid named by the {username} path value. It
+// answers 404 itself when the username is unknown.
+func (a *app) resolveKid(w http.ResponseWriter, r *http.Request) (kid, bool) {
+	username := r.PathValue("username")
+	k, found, err := a.store.kidByUsername(username)
+	if err != nil {
+		http.Error(w, "Erreur interne.", http.StatusInternalServerError)
+		return kid{}, false
+	}
+	if !found {
+		a.notFound(w, r)
+		return kid{}, false
+	}
+	return k, true
+}
+
+// GET /enfant/{username}: history + parent forms for one kid. Parents only:
+// a kid's own history is on their dashboard, and kids must not see each
 // other's money.
 func (a *app) handleKid(w http.ResponseWriter, r *http.Request) {
 	if !hasGroup(r, a.cfg.AdminGroup) {
@@ -254,13 +271,8 @@ func (a *app) handleKid(w http.ResponseWriter, r *http.Request) {
 	if _, err := a.store.ensureMonthlyAllowances(time.Now()); err != nil {
 		slog.Error("ensure allowances", "error", err)
 	}
-	k, err := a.store.getKid(parseID(r, "id"))
-	if errors.Is(err, errKidNotFound) {
-		a.notFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, "Erreur interne.", http.StatusInternalServerError)
+	k, ok := a.resolveKid(w, r)
+	if !ok {
 		return
 	}
 	data := a.basePageData(w, r, user, isAdmin)
@@ -321,10 +333,10 @@ func (a *app) handleCreateKid(w http.ResponseWriter, r *http.Request) {
 		slog.Error("ensure allowances", "error", err)
 	}
 	slog.Info("kid created", "kid", k.Name, "username", k.Username, "by", user)
-	http.Redirect(w, r, fmt.Sprintf("/kid/%d", k.ID), http.StatusSeeOther)
+	http.Redirect(w, r, "/enfant/"+url.PathEscape(k.Username), http.StatusSeeOther)
 }
 
-// POST /kid/{id}/monthly: change a kid's monthly amount (parents only).
+// POST /enfant/{username}/monthly: change a kid's monthly amount (parents only).
 func (a *app) handleMonthly(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	user, isAdmin := a.authedAdmin(w, r)
@@ -335,34 +347,30 @@ func (a *app) handleMonthly(w http.ResponseWriter, r *http.Request) {
 		a.renderAdminError(w, r, user, isAdmin, http.StatusForbidden, "Jeton de formulaire invalide. Recharge la page et réessaie.")
 		return
 	}
-	kidID := parseID(r, "id")
-	if _, err := a.store.getKid(kidID); errors.Is(err, errKidNotFound) {
-		a.notFound(w, r)
-		return
-	} else if err != nil {
-		http.Error(w, "Erreur interne.", http.StatusInternalServerError)
+	k, ok := a.resolveKid(w, r)
+	if !ok {
 		return
 	}
 	amount, err := parseAmount(r.FormValue("monthly_amount"))
 	if err != nil {
-		a.renderKidError(w, r, user, kidID, http.StatusBadRequest, err.Error())
+		a.renderKidError(w, r, user, k, http.StatusBadRequest, err.Error())
 		return
 	}
 	if amount < 0 || amount > maxAmountCents {
-		a.renderKidError(w, r, user, kidID, http.StatusBadRequest, "Le montant mensuel doit être entre 0 et 10 000 €.")
+		a.renderKidError(w, r, user, k, http.StatusBadRequest, "Le montant mensuel doit être entre 0 et 10 000 €.")
 		return
 	}
-	if err := a.store.updateMonthlyAmount(kidID, amount); err != nil {
+	if err := a.store.updateMonthlyAmount(k.ID, amount); err != nil {
 		slog.Error("update monthly amount", "error", err)
-		a.renderKidError(w, r, user, kidID, http.StatusInternalServerError, "Erreur à l'enregistrement.")
+		a.renderKidError(w, r, user, k, http.StatusInternalServerError, "Erreur à l'enregistrement.")
 		return
 	}
-	slog.Info("monthly amount updated", "kid_id", kidID, "amount", amount, "by", user)
-	http.Redirect(w, r, fmt.Sprintf("/kid/%d", kidID), http.StatusSeeOther)
+	slog.Info("monthly amount updated", "kid", k.Username, "amount", amount, "by", user)
+	http.Redirect(w, r, "/enfant/"+url.PathEscape(k.Username), http.StatusSeeOther)
 }
 
-// POST /kid/{id}/transaction: add a manual transaction. Parents may act on
-// any kid; a kid may only act on their own account.
+// POST /enfant/{username}/transaction: add a manual transaction. Parents may
+// act on any kid; a kid may only act on their own account.
 func (a *app) handleTransaction(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	user := remoteUser(r)
@@ -380,16 +388,12 @@ func (a *app) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		a.renderActionError(w, r, user, isAdmin, http.StatusForbidden, "Jeton de formulaire invalide. Recharge la page et réessaie.")
 		return
 	}
-	kidID := parseID(r, "id")
-	k, err := a.store.getKid(kidID)
-	if errors.Is(err, errKidNotFound) {
-		a.notFound(w, r)
-		return
-	} else if err != nil {
-		http.Error(w, "Erreur interne.", http.StatusInternalServerError)
+	k, ok := a.resolveKid(w, r)
+	if !ok {
 		return
 	}
 	// A kid may only act on their own account; a parent may act on any kid.
+	// Answer 404 rather than 403 so as not to leak other kids' existence.
 	if !isAdmin && k.Username != user {
 		a.notFound(w, r)
 		return
@@ -452,13 +456,13 @@ func (a *app) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 		date = parsed
 	}
-	if _, err := a.store.addTransaction(kidID, amount, label, remoteName(r), user, date, time.Now()); err != nil {
+	if _, err := a.store.addTransaction(k.ID, amount, label, remoteName(r), user, date, time.Now()); err != nil {
 		slog.Error("add transaction", "error", err)
 		a.renderActionError(w, r, user, isAdmin, http.StatusInternalServerError, "Erreur à l'enregistrement.")
 		return
 	}
 	slog.Info("transaction added", "kid", k.Name, "amount", amount, "label", label, "by", user)
-	a.redirectAfterAction(w, r, isAdmin, kidID)
+	a.redirectAfterAction(w, r, isAdmin, k)
 }
 
 // POST /transaction/{id}/delete: delete a manual transaction (parents only).
@@ -478,13 +482,21 @@ func (a *app) handleDeleteTransaction(w http.ResponseWriter, r *http.Request) {
 		a.notFound(w, r)
 		return
 	}
+	k, err := a.store.getKid(kidID)
+	if errors.Is(err, errKidNotFound) {
+		a.notFound(w, r)
+		return
+	} else if err != nil {
+		http.Error(w, "Erreur interne.", http.StatusInternalServerError)
+		return
+	}
 	if err := a.store.deleteTransaction(txID); err != nil {
 		slog.Error("delete transaction", "error", err)
 		http.Error(w, "Impossible de supprimer cette opération.", http.StatusBadRequest)
 		return
 	}
 	slog.Info("transaction deleted", "transaction_id", txID, "by", user)
-	http.Redirect(w, r, fmt.Sprintf("/kid/%d", kidID), http.StatusSeeOther)
+	http.Redirect(w, r, "/enfant/"+url.PathEscape(k.Username), http.StatusSeeOther)
 }
 
 func (a *app) authedAdmin(w http.ResponseWriter, r *http.Request) (user string, isAdmin bool) {
@@ -506,9 +518,9 @@ func parseID(r *http.Request, name string) int64 {
 }
 
 // redirectAfterAction sends a kid back to / and a parent to the kid page.
-func (a *app) redirectAfterAction(w http.ResponseWriter, r *http.Request, isAdmin bool, kidID int64) {
+func (a *app) redirectAfterAction(w http.ResponseWriter, r *http.Request, isAdmin bool, k kid) {
 	if isAdmin {
-		http.Redirect(w, r, fmt.Sprintf("/kid/%d", kidID), http.StatusSeeOther)
+		http.Redirect(w, r, "/enfant/"+url.PathEscape(k.Username), http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -517,27 +529,30 @@ func (a *app) redirectAfterAction(w http.ResponseWriter, r *http.Request, isAdmi
 // renderActionError re-renders the page the user came from with an error
 // message (kid dashboard or kid detail, depending on role).
 func (a *app) renderActionError(w http.ResponseWriter, r *http.Request, user string, isAdmin bool, status int, message string) {
-	kidID := parseID(r, "id")
+	k, found, err := a.store.kidByUsername(r.PathValue("username"))
 	if isAdmin {
-		a.renderKidError(w, r, user, kidID, status, message)
+		if err == nil && found {
+			a.renderKidError(w, r, user, k, status, message)
+		} else {
+			a.renderAdminError(w, r, user, isAdmin, status, message)
+		}
 		return
 	}
-	a.renderKidDashboardError(w, r, user, kidID, status, message)
+	a.renderKidDashboardError(w, r, user, status, message)
 }
 
-func (a *app) renderKidError(w http.ResponseWriter, r *http.Request, user string, kidID int64, status int, message string) {
+func (a *app) renderKidError(w http.ResponseWriter, r *http.Request, user string, k kid, status int, message string) {
 	data := a.basePageData(w, r, user, true)
-	k, err := a.store.getKid(kidID)
+	overview, err := a.store.overview(k)
 	if err == nil {
-		overview, _ := a.store.overview(k)
 		data.Detail = &overview
-		data.Transactions, _ = a.store.listTransactions(kidID)
+		data.Transactions, _ = a.store.listTransactions(k.ID)
 	}
 	data.Error = message
 	a.render(w, r, status, "kid.html", data)
 }
 
-func (a *app) renderKidDashboardError(w http.ResponseWriter, r *http.Request, user string, kidID int64, status int, message string) {
+func (a *app) renderKidDashboardError(w http.ResponseWriter, r *http.Request, user string, status int, message string) {
 	data := a.basePageData(w, r, user, false)
 	if k, found, err := a.store.kidByUsername(user); err == nil && found {
 		overview, _ := a.store.overview(k)

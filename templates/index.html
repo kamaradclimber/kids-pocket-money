@@ -68,7 +68,7 @@
   <p class="meta">C'est l'argent que tes parents gardent pour toi.</p>
 
   <h2>Enregistrer une dépense</h2>
-  <form method="post" action="/kid/{{.ID}}/transaction">
+  <form method="post" action="/enfant/{{.Username}}/transaction">
     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
     <label for="amount">Montant en euros</label>
     <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="12,50" required>
