@@ -64,7 +64,7 @@ func TestEuro(t *testing.T) {
 
 func TestHasGroup(t *testing.T) {
 	r, _ := http.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Remote-Groups", "kids, parents ,extra-videos-admin")
+	r.Header.Set("Remote-Groups", "kids, parents ,some-admin")
 	if !hasGroup(r, "parents") {
 		t.Error("expected parents to be detected")
 	}

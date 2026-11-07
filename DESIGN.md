@@ -3,9 +3,9 @@
 ## Overview
 
 Single Go binary, no framework, stdlib `net/http` + pure-Go SQLite driver
-(`modernc.org/sqlite`, works with `CGO_ENABLED=0`). Same conventions as
-`password-change` and `extra-videos`: env-based config, `slog` JSON logs,
-embedded templates, trusted `Remote-User`/`Remote-Groups` headers.
+(`modernc.org/sqlite`, works with `CGO_ENABLED=0`). Env-based config,
+`slog` JSON logs, embedded templates, trusted `Remote-User`/`Remote-Groups`
+headers.
 
 ## Authentication & roles
 
@@ -94,8 +94,8 @@ Consequences:
 | POST | `/transaction/{id}/delete` | parent | delete a manual transaction |
 | GET | `/healthz`, `/readyz` | anyone | liveness/readiness |
 
-All POSTs require the CSRF token (cookie + hidden field, see
-`extra-videos`), are `ParseForm`-limited and redirect (303) back.
+All POSTs require the CSRF token (cookie + hidden field), are
+`ParseForm`-limited and redirect (303) back.
 
 ## Security
 
@@ -107,11 +107,11 @@ All POSTs require the CSRF token (cookie + hidden field, see
 
 ## UI
 
-French, one CSS copied from the two reference apps (card layout,
-`#285a48` buttons, badges, dark mode via `prefers-color-scheme`):
+French, a single-card layout in a small inline stylesheet
+(`#285a48` buttons, badges, dark mode via `prefers-color-scheme`):
 
 - **kid view**: big balance, "Tes opérations" list (label, date, amount
-  colored green/red), form to record a dépense/ajout.
+  colored green/red), form to record a dépense.
 - **parent view**: one card per kid (name, monthly amount, balance),
   forms to create a kid, change a monthly amount, and per-kid page to add
   or delete transactions.
@@ -121,4 +121,5 @@ French, one CSS copied from the two reference apps (card layout,
 Docker image (`golang:1.27-alpine` → `alpine`, user 65532, `VOLUME /data`),
 SQLite in `/data/pocket-money.db` (WAL) on a Kubernetes persistent volume.
 Readiness probe on `/readyz`. Env: `LISTEN_ADDR`, `DATA_DIR`, `ADMIN_GROUP`,
-`SECURE_COOKIES`. Example manifest in `deploy/`.
+`KIDS_GROUP`, `SECURE_COOKIES`. Deployment manifests live in the private
+infrastructure repository.

@@ -71,9 +71,9 @@ docker build -t kids-pocket-money .
 docker run --rm -p 8080:8080 -v pocket-money:/data kids-pocket-money
 ```
 
-In our family setup, it runs on kubernetes with a persistent volume; an
-example manifest (Deployment + PVC + Service + Traefik IngressRoute behind
-authelia) is provided in [deploy/kids-pocket-money.yaml](deploy/kids-pocket-money.yaml).
+In production it runs on Kubernetes with a persistent volume for the
+SQLite database, behind a reverse proxy that sets the `Remote-*` headers
+(authelia).
 
 ## Development
 
@@ -81,6 +81,5 @@ authelia) is provided in [deploy/kids-pocket-money.yaml](deploy/kids-pocket-mone
 go test ./...
 ```
 
-The web UI is in French, in the same style as our other family apps
-(`password-change`, `extra-videos`): server-rendered templates, no
-JavaScript framework, dark mode support, CSP with nonces, CSRF protection.
+The web UI is in French: server-rendered templates, no JavaScript
+framework, dark mode support, CSP with nonces, CSRF protection.
