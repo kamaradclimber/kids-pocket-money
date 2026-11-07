@@ -684,3 +684,28 @@ func TestExportCSV(t *testing.T) {
 		t.Errorf("expected 404 for unknown kid, got %d", rec.Code)
 	}
 }
+
+func TestFooterLinksToSource(t *testing.T) {
+	a := testApp(t)
+	month := time.Now().Format("2006-01")
+	if _, err := a.store.createKid("alice", "Alice", 1000, month, "parent", time.Now()); err != nil {
+		t.Fatalf("createKid: %v", err)
+	}
+	link := `href="https://github.com/kamaradclimber/kids-pocket-money"`
+	// Kid dashboard.
+	if body := request(t, a, http.MethodGet, "/", "alice", "kids", nil).Body.String(); !strings.Contains(body, link) {
+		t.Error("kid dashboard should show the source-code footer link")
+	}
+	// Family view.
+	if body := request(t, a, http.MethodGet, "/", "papa", "parents", nil).Body.String(); !strings.Contains(body, link) {
+		t.Error("family view should show the source-code footer link")
+	}
+	// Kid detail page.
+	if body := request(t, a, http.MethodGet, "/enfant/alice", "papa", "parents", nil).Body.String(); !strings.Contains(body, link) {
+		t.Error("kid detail page should show the source-code footer link")
+	}
+	// 404 page.
+	if body := request(t, a, http.MethodGet, "/inconnu", "alice", "kids", nil).Body.String(); !strings.Contains(body, link) {
+		t.Error("404 page should show the source-code footer link")
+	}
+}
