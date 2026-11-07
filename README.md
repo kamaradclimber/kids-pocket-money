@@ -16,7 +16,7 @@ Single Go binary (stdlib `net/http`, no framework) with a SQLite database
 [DESIGN.md](DESIGN.md). In short:
 
 - **Kids** open `/`, see their balance and their history, and can record
-  their own operations (a dépense or an ajout, with a label).
+  their own operations (a dépense with a label and an optional date).
 - **Parents** (members of the `ADMIN_GROUP`, e.g. `parents`) get the family
   dashboard: one card per kid with balance and monthly amount, a form to add
   a kid, and a per-kid page to change the monthly amount, add or delete

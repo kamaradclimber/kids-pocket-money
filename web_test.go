@@ -441,3 +441,88 @@ func TestAllowanceNotDeletableFromUI(t *testing.T) {
 		t.Errorf("allowance balance must be untouched, got %d", balance)
 	}
 }
+
+func TestTransactionWithOptionalDate(t *testing.T) {
+	a := testApp(t)
+	now := time.Now()
+	k, err := a.store.createKid("alice", "Alice", 1000, now.Format("2006-01"), "parent", now)
+	if err != nil {
+		t.Fatalf("createKid: %v", err)
+	}
+
+	// Backdated spend: date field set to the 3rd of the previous month.
+	opDate := now.AddDate(0, -1, 0)
+	for opDate.Day() != 3 {
+		opDate = opDate.AddDate(0, 0, 1)
+	}
+	form := url.Values{
+		"csrf_token": {strings.Repeat("a", 64)},
+		"kind":       {"spend"},
+		"amount":     {"2,50"},
+		"label":      {"bonbons"},
+		"date":       {opDate.Format("2006-01-02")},
+	}
+	rec := request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	txs, _ := a.store.listTransactions(k.ID)
+	found := false
+	for _, tx := range txs {
+		if tx.Label == "bonbons" {
+			found = true
+			if tx.Date != opDate.Format("2006-01-02") {
+				t.Errorf("expected date %s, got %q", opDate.Format("2006-01-02"), tx.Date)
+			}
+			if tx.Month != opDate.Format("2006-01") {
+				t.Errorf("expected month %s, got %q", opDate.Format("2006-01"), tx.Month)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("transaction was not stored")
+	}
+}
+
+func TestTransactionInvalidDateRejected(t *testing.T) {
+	a := testApp(t)
+	now := time.Now()
+	k, err := a.store.createKid("alice", "Alice", 1000, now.Format("2006-01"), "parent", now)
+	if err != nil {
+		t.Fatalf("createKid: %v", err)
+	}
+	_, _ = a.store.ensureMonthlyAllowances(now)
+
+	form := url.Values{
+		"csrf_token": {strings.Repeat("a", 64)},
+		"kind":       {"spend"},
+		"amount":     {"2,50"},
+		"label":      {"bonbons"},
+		"date":       {"31/02/2025"}, // French day-first format must be rejected
+	}
+	rec := request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid date, got %d", rec.Code)
+	}
+	// Nothing was stored.
+	balance, _ := a.store.balance(k.ID)
+	if balance != 1000 {
+		t.Errorf("balance must be untouched after invalid date, got %d", balance)
+	}
+
+	// Out-of-range year rejected too.
+	form.Set("date", "1999-12-31")
+	rec = request(t, a, http.MethodPost, "/kid/"+strconv.FormatInt(k.ID, 10)+"/transaction", "alice", "kids", form)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for out-of-range date, got %d", rec.Code)
+	}
+}
+
+func TestNiceDate(t *testing.T) {
+	if got := niceDate("2025-11-03"); got != "03/11/2025" {
+		t.Errorf("niceDate(2025-11-03) = %q, want 03/11/2025", got)
+	}
+	if got := niceDate("not-a-date"); got != "not-a-date" {
+		t.Errorf("niceDate fallback failed: %q", got)
+	}
+}

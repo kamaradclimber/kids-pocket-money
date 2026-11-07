@@ -89,6 +89,9 @@
     <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="12,50" required>
     <label for="label">Description</label>
     <input id="label" name="label" maxlength="200" autocomplete="off" placeholder="ex : achat d'un jeu" required>
+    <label for="tx-date">Date (optionnel)</label>
+    <input id="tx-date" name="date" type="date" autocomplete="off">
+    <p class="hint">Laisse vide pour aujourd'hui. Utilise une date passée pour enregistrer une opération déjà faite.</p>
     <button type="submit">Enregistrer l'opération</button>
   </form>
 
@@ -103,7 +106,7 @@
       </div>
       <p class="tx-meta">
         {{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedBy}}{{end}}
-        · {{date .CreatedAt}}
+        · {{niceDate .Date}}
         {{if eq .Kind "manual"}}
         <form method="post" action="/transaction/{{.ID}}/delete" data-confirm="Supprimer « {{.Label}} ({{euro .Amount}}) » ?">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">

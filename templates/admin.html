@@ -73,6 +73,9 @@
         <input id="tx-amount-{{.ID}}" name="amount" inputmode="decimal" autocomplete="off" placeholder="12,50" required>
         <label for="tx-label-{{.ID}}">Description</label>
         <input id="tx-label-{{.ID}}" name="label" maxlength="200" autocomplete="off" placeholder="ex : achat d'un jeu" required>
+        <label for="tx-date-{{.ID}}">Date (optionnel)</label>
+        <input id="tx-date-{{.ID}}" name="date" type="date" autocomplete="off">
+        <p class="hint">Laisse vide pour aujourd'hui.</p>
         <button type="submit">Enregistrer l'opération</button>
       </form>
       <p class="meta"><a href="/kid/{{.ID}}">Voir le détail et l'historique</a></p>

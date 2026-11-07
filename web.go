@@ -55,6 +55,7 @@ func newApp(cfg config, st *store) (*app, error) {
 	funcs := template.FuncMap{
 		"euro":      euro,
 		"date":      func(t time.Time) string { return t.Format("02/01/2006") },
+		"niceDate":  niceDate,
 		"monthName": monthName,
 	}
 	templates, err := template.New("").Funcs(funcs).ParseFS(templateFiles, "templates/*.html")
@@ -72,6 +73,15 @@ func euro(cents int64) string {
 		cents = -cents
 	}
 	return fmt.Sprintf("%s%d,%02d €", sign, cents/100, cents%100)
+}
+
+// niceDate renders an operation date ("2006-01-02") in French day-first
+// order; anything unparseable (should not happen) is shown as-is.
+func niceDate(date string) string {
+	if t, err := time.Parse("2006-01-02", date); err == nil {
+		return t.Format("02/01/2006")
+	}
+	return date
 }
 
 func monthName(month string) string {
@@ -412,7 +422,24 @@ func (a *app) handleTransaction(w http.ResponseWriter, r *http.Request) {
 	if len(label) > 200 {
 		label = label[:200]
 	}
-	if _, err := a.store.addTransaction(kidID, amount, label, user, time.Now()); err != nil {
+	// Optional operation date (empty = today). HTML date inputs submit
+	// "YYYY-MM-DD".
+	date := time.Now()
+	if raw := strings.TrimSpace(r.FormValue("date")); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			a.renderActionError(w, r, user, isAdmin, http.StatusBadRequest, "Date invalide : utilise le calendrier ou laisse vide pour aujourd'hui.")
+			return
+		}
+		// Refuse far-fetched dates (guards the month derivation and the
+		// ordering) without forbidding the odd future purchase.
+		if parsed.Year() < 2000 || parsed.Year() > time.Now().Year()+1 {
+			a.renderActionError(w, r, user, isAdmin, http.StatusBadRequest, "Date hors limites.")
+			return
+		}
+		date = parsed
+	}
+	if _, err := a.store.addTransaction(kidID, amount, label, user, date, time.Now()); err != nil {
 		slog.Error("add transaction", "error", err)
 		a.renderActionError(w, r, user, isAdmin, http.StatusInternalServerError, "Erreur à l'enregistrement.")
 		return

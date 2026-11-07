@@ -49,14 +49,21 @@ CREATE TABLE transactions (
   label TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('allowance','manual')),
   month TEXT NOT NULL,                  -- "YYYY-MM" the tx belongs to
+  date TEXT NOT NULL DEFAULT '',         -- "YYYY-MM-DD", operation date
   created_by TEXT NOT NULL,             -- Remote-User or "system"
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL               -- technical creation timestamp
 );
 
 -- one allowance per kid per month
 CREATE UNIQUE INDEX idx_transactions_allowance
   ON transactions(kid_id, month) WHERE kind = 'allowance';
 ```
+
+The `date` column is the **operation date** (what happened when), distinct
+from `created_at` (when the row was recorded). It was added after the first
+deployed version: the migration adds it to existing databases with ALTER
+TABLE and backfills it (first day of the credited month for allowances,
+creation day for manual rows). The history is ordered by `date DESC`.
 
 All money is stored in **integer cents**; the UI displays `12,50 €`.
 `balance(kid) = SUM(transactions.amount)`.
@@ -90,7 +97,7 @@ Consequences:
 | GET | `/kid/{id}` | parent / that kid | history + parent forms |
 | POST | `/kid` | parent | create kid |
 | POST | `/kid/{id}/monthly` | parent | change monthly amount |
-| POST | `/kid/{id}/transaction` | parent / that kid | add manual transaction |
+| POST | `/kid/{id}/transaction` | parent / that kid | add manual transaction (optional operation date) |
 | POST | `/transaction/{id}/delete` | parent | delete a manual transaction |
 | GET | `/healthz`, `/readyz` | anyone | liveness/readiness |
 

@@ -75,6 +75,9 @@
     <label for="label">Description</label>
     <input id="label" name="label" maxlength="200" autocomplete="off" placeholder="ex : achat d'un jeu" required>
     <input type="hidden" name="kind" value="spend">
+    <label for="date">Date (optionnel)</label>
+    <input id="date" name="date" type="date" autocomplete="off">
+    <p class="hint">Laisse vide pour aujourd'hui.</p>
     <p class="hint">Le montant est retiré de ton solde. Pour ajouter de l'argent, demande à un parent.</p>
     <button type="submit">Enregistrer la dépense</button>
   </form>
@@ -88,7 +91,7 @@
         <span class="tx-label">{{.Label}}{{if eq .Kind "allowance"}} <span class="badge monthly">{{monthName .Month}}</span>{{end}}</span>
         <span class="tx-amount {{if lt .Amount 0}}debit{{else}}credit{{end}}">{{euro .Amount}}</span>
       </div>
-      <p class="tx-meta">{{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedBy}}{{end}} · {{date .CreatedAt}}</p>
+      <p class="tx-meta">{{if eq .Kind "allowance"}}Argent de poche mensuel{{else}}Ajouté par {{.CreatedBy}}{{end}} · {{niceDate .Date}}</p>
     </li>
     {{end}}
   </ul>
