@@ -1,0 +1,8 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "prConcurrentLimit": 1,
+  "prHourlyLimit": 1,
+  "schedule": ["on the first day of the month"]
+}
