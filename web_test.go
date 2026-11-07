@@ -282,12 +282,28 @@ func TestKidDashboard(t *testing.T) {
 
 func TestParentDashboard(t *testing.T) {
 	a := testApp(t)
+	month := time.Now().Format("2006-01")
+	if _, err := a.store.createKid("alice", "Alice", 1000, month, "parent", time.Now()); err != nil {
+		t.Fatalf("createKid: %v", err)
+	}
 	rec := request(t, a, http.MethodGet, "/", "parent@example", "parents", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Ajouter un enfant") {
+	body := rec.Body.String()
+	if !strings.Contains(body, "Ajouter un enfant") {
 		t.Error("parent dashboard should render the create-kid form")
+	}
+	// Read-only recap: name, balance and the link to the kid page.
+	for _, want := range []string{"Alice", "10,00 €", "Voir le détail et l'historique", "/kid/1"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("parent dashboard should show %q", want)
+		}
+	}
+	// No transaction form on the family view: adding an operation is done
+	// from the kid detail page.
+	if strings.Contains(body, "Enregistrer l'opération") {
+		t.Error("parent dashboard must not render the transaction form")
 	}
 }
 
