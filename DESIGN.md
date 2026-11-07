@@ -100,7 +100,8 @@ Consequences:
 | Method | Path | Who | Action |
 |--------|------|-----|--------|
 | GET | `/` | kid / parent | kid: own dashboard; parent: family dashboard |
-| GET | `/enfant/{username}` | parent | history + parent forms |
+| GET | `/enfant/{username}` | parent / that kid | detail page (kid: read-only, no parent forms) |
+| GET | `/enfant/{username}/export.csv` | parent / that kid | full history as CSV (data portability) |
 | POST | `/kid` | parent | create kid |
 | POST | `/enfant/{username}/monthly` | parent | change monthly amount |
 | POST | `/enfant/{username}/transaction` | parent / that kid | add manual transaction (optional operation date) |
@@ -109,6 +110,15 @@ Consequences:
 
 All POSTs require the CSRF token (cookie + hidden field), are
 `ParseForm`-limited and redirect (303) back.
+
+Status codes: **401** without `Remote-User`, **403** for authenticated
+users outside the kids/parents groups and for a kid accessing another
+kid's data (it is fine to confirm a sibling's existence), **404** for an
+unknown kid, **400** for invalid form input, **303** after a successful
+POST.
+
+Only the **first name** of authelia's `Remote-Name` is recorded in
+`created_name` ("Grégoire Seux" → "Grégoire").
 
 ## Security
 

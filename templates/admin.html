@@ -63,7 +63,7 @@
         <span class="balance {{if lt .Balance 0}}negative{{end}}">{{euro .Balance}}</span>
       </div>
       <p class="meta">Compte {{.Username}} · {{euro .MonthlyAmount}} par mois (depuis {{monthName .StartMonth}})</p>
-      <p class="meta"><a href="/enfant/{{.Username}}">Voir le détail et l'historique</a></p>
+      <p class="meta"><a href="/enfant/{{.Username}}">Voir le détail et l'historique</a> · <a href="/enfant/{{.Username}}/export.csv">Exporter en CSV</a></p>
     </li>
     {{end}}
   </ul>

@@ -83,6 +83,7 @@
   </form>
 
   <h2>Tes opérations</h2>
+  <p class="meta"><a href="/enfant/{{.Username}}/export.csv">Exporter mes opérations (CSV)</a></p>
   {{if $.Transactions}}
   <ul class="tx-list">
     {{range $.Transactions}}

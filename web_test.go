@@ -258,16 +258,18 @@ func TestKidViewsOwnDetailButNotOthers(t *testing.T) {
 		}
 	}
 
-	// Another kid's page, and unknown usernames, are 404: usernames must
-	// not be enumerable. A parent sees any kid.
+	// Another kid's page is 403 (it is fine to confirm a sibling exists);
+	// unknown usernames stay 404.
 	for _, tc := range []struct{ user, groups, target string }{
 		{"alice", "kids", "/enfant/bob"},
-		{"alice", "kids", "/enfant/inconnu"},
 	} {
 		rec := request(t, a, http.MethodGet, tc.target, tc.user, tc.groups, nil)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s as %s: expected 404, got %d", tc.target, tc.user, rec.Code)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("GET %s as %s: expected 403, got %d", tc.target, tc.user, rec.Code)
 		}
+	}
+	if rec := request(t, a, http.MethodGet, "/enfant/inconnu", "alice", "kids", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("GET /enfant/inconnu as alice: expected 404, got %d", rec.Code)
 	}
 	rec := request(t, a, http.MethodGet, "/enfant/bob", "papa", "parents", nil)
 	if rec.Code != http.StatusOK {
@@ -398,10 +400,11 @@ func TestKidCanAddOwnTransactionButNotOthers(t *testing.T) {
 		t.Errorf("expected 550, got %d", balance)
 	}
 
-	// Alice cannot act on Bob's account.
+	// Alice cannot act on Bob's account (403: it is fine to confirm a
+	// sibling exists).
 	rec = request(t, a, http.MethodPost, "/enfant/bob/transaction", "alice", "kids", form)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for another kid, got %d", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for another kid, got %d", rec.Code)
 	}
 	balance2, _ := a.store.balance(k2.ID)
 	if balance2 != 1000 {
@@ -614,8 +617,70 @@ func TestRemoteNameFallsBackToUsername(t *testing.T) {
 	if got := remoteName(r); got != "grego" {
 		t.Errorf("expected fallback to username, got %q", got)
 	}
+	// Only the first name is kept ("Grégoire Seux" -> "Grégoire").
 	r.Header.Set("Remote-Name", "  Grégoire Seux  ")
-	if got := remoteName(r); got != "Grégoire Seux" {
-		t.Errorf("expected trimmed Remote-Name, got %q", got)
+	if got := remoteName(r); got != "Grégoire" {
+		t.Errorf("expected first name Grégoire, got %q", got)
+	}
+}
+
+func TestExportCSV(t *testing.T) {
+	a := testApp(t)
+	now := time.Now()
+	k, err := a.store.createKid("alice", "Alice", 1000, now.Format("2006-01"), "parent", now)
+	if err != nil {
+		t.Fatalf("createKid: %v", err)
+	}
+	opDate := time.Date(now.Year(), now.Month(), 3, 0, 0, 0, 0, time.Local)
+	if _, err := a.store.addTransaction(k.ID, -450, "bonbons; \"speciaux\"", "Alice", "alice", opDate, now); err != nil {
+		t.Fatalf("addTransaction: %v", err)
+	}
+	_, _ = a.store.ensureMonthlyAllowances(now)
+
+	rec := request(t, a, http.MethodGet, "/enfant/alice/export.csv", "alice", "kids", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for own export, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if ct := rec.Header().Get("Content-Type"); ct != "text/csv; charset=utf-8" {
+		t.Errorf("unexpected content type %q", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment; filename=operations-alice.csv") {
+		t.Errorf("unexpected content disposition %q", cd)
+	}
+	// BOM for French Excel, French header, semicolon separated, decimal
+	// comma amounts, quoted label with doubled inner quotes.
+	for _, want := range []string{
+		"\uFEFFdate;libellé;type;montant",
+		`"bonbons; ""speciaux"""`,
+		"Opération;-4,50",
+		"Argent de poche;10,00",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("export should contain %q, got:\n%s", want, body)
+		}
+	}
+	// Chronological: oldest first (allowance date < bonbons date, both this
+	// month, so compare positions).
+	if strings.Index(body, "Argent de poche;10,00") > strings.Index(body, "Opération;-4,50") {
+		t.Error("export should be chronological (allowance first)")
+	}
+
+	// Parent exports any kid.
+	rec = request(t, a, http.MethodGet, "/enfant/alice/export.csv", "papa", "parents", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for a parent export, got %d", rec.Code)
+	}
+	// Another kid's export is 403 (bob exists); unknown kid is 404.
+	if _, err := a.store.createKid("bob", "Bob", 500, now.Format("2006-01"), "parent", now); err != nil {
+		t.Fatalf("createKid bob: %v", err)
+	}
+	rec = request(t, a, http.MethodGet, "/enfant/bob/export.csv", "alice", "kids", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 exporting another kid, got %d", rec.Code)
+	}
+	rec = request(t, a, http.MethodGet, "/enfant/inconnu/export.csv", "papa", "parents", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown kid, got %d", rec.Code)
 	}
 }

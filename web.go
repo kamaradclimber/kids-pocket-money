@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -114,6 +115,7 @@ func (a *app) routes() http.Handler {
 	app := http.NewServeMux()
 	app.HandleFunc("GET /", a.handleIndex)
 	app.HandleFunc("GET /enfant/{username}", a.handleKid)
+	app.HandleFunc("GET /enfant/{username}/export.csv", a.handleExport)
 	app.HandleFunc("POST /kid", a.handleCreateKid)
 	app.HandleFunc("POST /enfant/{username}/monthly", a.handleMonthly)
 	app.HandleFunc("POST /enfant/{username}/transaction", a.handleTransaction)
@@ -153,17 +155,22 @@ func remoteUser(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("Remote-User"))
 }
 
-// remoteName returns the display name of the authenticated user, as
-// provided by authelia in the Remote-Name header. Falls back to the
-// username when the header is absent.
+// remoteName returns the first name of the authenticated user, as provided
+// by authelia in the Remote-Name header ("Grégoire Seux" → "Grégoire").
+// Falls back to the username when the header is absent.
 func remoteName(r *http.Request) string {
-	if name := strings.TrimSpace(r.Header.Get("Remote-Name")); name != "" {
-		if len(name) > 200 {
-			name = name[:200]
-		}
-		return name
+	name := strings.TrimSpace(r.Header.Get("Remote-Name"))
+	if name == "" {
+		return remoteUser(r)
 	}
-	return remoteUser(r)
+	// Only the first name: history lines read "Ajouté par Grégoire".
+	if fields := strings.Fields(name); len(fields) > 0 {
+		name = fields[0]
+	}
+	if len(name) > 200 {
+		name = name[:200]
+	}
+	return name
 }
 
 func hasGroup(r *http.Request, wanted string) bool {
@@ -271,9 +278,8 @@ func (a *app) handleKid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A kid may only view their own page; a parent may view any kid.
-	// 404 (not 403): usernames must not be enumerable by other kids.
 	if !isAdmin && k.Username != user {
-		a.notFound(w, r)
+		http.Error(w, "Tu ne peux voir que ton propre compte.", http.StatusForbidden)
 		return
 	}
 	data := a.basePageData(w, r, user, isAdmin)
@@ -285,6 +291,65 @@ func (a *app) handleKid(w http.ResponseWriter, r *http.Request) {
 	data.Detail = &overview
 	data.Transactions, _ = a.store.listTransactions(k.ID)
 	a.render(w, r, http.StatusOK, "kid.html", data)
+}
+
+// GET /enfant/{username}/export.csv: full history of a kid as CSV, for data
+// portability. Parents export any kid; a kid exports their own account.
+func (a *app) handleExport(w http.ResponseWriter, r *http.Request) {
+	user := remoteUser(r)
+	isAdmin := hasGroup(r, a.cfg.AdminGroup)
+	k, ok := a.resolveKid(w, r)
+	if !ok {
+		return
+	}
+	if !isAdmin && k.Username != user {
+		http.Error(w, "Tu ne peux exporter que ton propre compte.", http.StatusForbidden)
+		return
+	}
+	txs, err := a.store.listTransactions(k.ID)
+	if err != nil {
+		slog.Error("export transactions", "error", err)
+		http.Error(w, "Erreur interne.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=operations-%s.csv", csvSafe(k.Username)))
+	w.Header().Set("Cache-Control", "no-store")
+	bw := bufio.NewWriter(w)
+	defer func() { _ = bw.Flush() }()
+	// BOM so French Excel opens the UTF-8 file with correct accents.
+	_, _ = bw.WriteString("\uFEFF")
+	_, _ = bw.WriteString("date;libellé;type;montant\n")
+	// Chronological order: oldest first.
+	for i := len(txs) - 1; i >= 0; i-- {
+		tx := txs[i]
+		kind := "Opération"
+		if tx.Kind == txKindAllowance {
+			kind = "Argent de poche"
+		}
+		_, _ = fmt.Fprintf(bw, "%s;%s;%s;%s\n",
+			tx.Date,
+			"\""+strings.ReplaceAll(tx.Label, "\"", "\"\"")+"\"",
+			kind,
+			strings.TrimSuffix(euro(tx.Amount), " €"))
+	}
+}
+
+// csvSafe keeps a username usable inside a filename.
+func csvSafe(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, s)
+	s = strings.Trim(s, "-")
+	if s == "" {
+		s = "export"
+	}
+	return s
 }
 
 // POST /kid: create a kid (parents only).
@@ -394,9 +459,8 @@ func (a *app) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A kid may only act on their own account; a parent may act on any kid.
-	// Answer 404 rather than 403 so as not to leak other kids' existence.
 	if !isAdmin && k.Username != user {
-		a.notFound(w, r)
+		http.Error(w, "Tu ne peux enregistrer des opérations que sur ton propre compte.", http.StatusForbidden)
 		return
 	}
 	amount, err := parseAmount(r.FormValue("amount"))
